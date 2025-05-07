@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Interview Questions</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .question {
+            background-color: #f9f9f9;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
+        .start-button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 20px;
+        }
+        .start-button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <h1>Interview Questions</h1>
+    <div id="questions-container">
+        {% for question in questions %}
+        <div class="question">
+            <p>{{ question }}</p>
+        </div>
+        {% endfor %}
+    </div>
+    <form action="/start_interview" method="POST">
+        <input type="hidden" name="session_id" value="{{ session_id }}">
+        <button type="submit" class="start-button">Start Interview</button>
+    </form>
+</body>
+</html>

@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Interview Interface</title>
+    <script>
+        window.onload = function() {
+            // Automatically submit the form when the page loads
+            document.getElementById('startForm').submit();
+        }
+    </script>
+</head>
+<body>
+    <h1>Interview Interface</h1>
+    <p>Starting interview, please wait...</p>
+    <form id="startForm" action="/start_interview" method="post">
+        <input type="hidden" name="session_id" value="{{ session_id }}">
+    </form>
+</body>
+</html>

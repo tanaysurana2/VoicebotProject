@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Interview Setup</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input[type="text"], input[type="number"] {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+        }
+        .skills-container {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .skill-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        .skill-item input {
+            margin-right: 5px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <h1>Interview Setup</h1>
+    <form id="interviewForm" action="/configure_interview" method="POST">
+        <div class="form-group">
+            <label for="resume_url">Resume URL:</label>
+            <input type="text" id="resume_url" name="resume_url" required>
+        </div>
+
+        <div class="form-group">
+            <label for="job_description">Job Description:</label>
+            <input type="text" id="job_description" name="job_description">
+        </div>
+
+        <div class="form-group">
+            <label for="job_application_id">Job Application ID:</label>
+            <input type="number" id="job_application_id" name="job_application_id" required>
+        </div>
+
+        <div class="form-group">
+            <label>Job Skills:</label>
+            <div class="skills-container" id="jobSkills">
+                <button type="button" onclick="addSkill('jobSkills')">Add Skill</button>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Mandatory Skills:</label>
+            <div class="skills-container" id="mandatorySkills">
+                <button type="button" onclick="addSkillGroup('mandatorySkills')">Add Skill Group</button>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Optional Skills:</label>
+            <div class="skills-container" id="optionalSkills">
+                <button type="button" onclick="addSkillGroup('optionalSkills')">Add Skill Group</button>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>
+                <input type="checkbox" id="followup_enabled" name="followup_enabled" checked>
+                Enable Follow-up Questions
+            </label>
+        </div>
+
+        <div class="form-group">
+            <label>
+                <input type="checkbox" id="interruptToggle" name="interruptToggle">
+                Enable Interruptions
+            </label>
+        </div>
+
+        <div class="form-group">
+            <label>Speech-to-Text Provider:</label>
+            <select name="stt_provider" id="stt_provider" required>
+                <option value="FastRTC">FastRTC</option>
+                <option value="AssemblyAI">AssemblyAI</option>
+            </select>
+        </div>
+
+        <button type="submit">Submit</button>
+    </form>
+
+    <script>
+        function addSkill(containerId) {
+            const container = document.getElementById(containerId);
+            const skillItem = document.createElement('div');
+            skillItem.className = 'skill-item';
+            const inputName = containerId === 'jobSkills' ? 'jobSkills[]' : `${containerId}[0][]`;
+            skillItem.innerHTML = `
+                <input type="text" name="${inputName}">
+                <button type="button" onclick="this.parentElement.remove()">Remove</button>
+            `;
+            container.insertBefore(skillItem, container.lastElementChild);
+        }
+
+        function addSkillGroup(containerId) {
+            const container = document.getElementById(containerId);
+            const groupCount = container.querySelectorAll('.skills-container').length;
+            const groupContainer = document.createElement('div');
+            groupContainer.className = 'skills-container';
+            groupContainer.innerHTML = `
+                <div class="skill-item">
+                    <input type="text" name="${containerId}[${groupCount}][]">
+                    <button type="button" onclick="addSkillToGroup(this.parentElement.parentElement, ${groupCount})">Add Skill</button>
+                    <button type="button" onclick="this.parentElement.parentElement.remove()">Remove Group</button>
+                </div>
+            `;
+            container.insertBefore(groupContainer, container.lastElementChild);
+        }
+
+        function addSkillToGroup(group, groupIndex) {
+            const skillItem = document.createElement('div');
+            skillItem.className = 'skill-item';
+            skillItem.innerHTML = `
+                <input type="text" name="${group.parentElement.id}[${groupIndex}][]">
+                <button type="button" onclick="this.parentElement.remove()">Remove</button>
+            `;
+            group.appendChild(skillItem);
+        }
+
+        // Add form submission handling
+        document.getElementById('interviewForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            // Validate that at least one job skill is entered
+            const jobSkills = document.querySelectorAll('input[name^="jobSkills"]');
+            if (!Array.from(jobSkills).some(input => input.value.trim())) {
+                alert('Please enter at least one job skill');
+                return;
+            }
+
+            // Validate that at least one mandatory skill is entered
+            const mandatorySkills = document.querySelectorAll('input[name^="mandatorySkills"]');
+            if (!Array.from(mandatorySkills).some(input => input.value.trim())) {
+                alert('Please enter at least one mandatory skill');
+                return;
+            }
+
+            // Submit the form
+            this.submit();
+        });
+
+        document.getElementById('interruptToggle').addEventListener('change', function() {
+            const interruptToggle = this.checked;
+            fetch('/your-endpoint', {
+                method: 'POST',
+                body: JSON.stringify({
+                    // ...other payload fields
+                    enable_interrupt: interruptToggle
+                }),
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+        });
+    </script>
+</body>
+</html>
