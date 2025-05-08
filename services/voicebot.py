@@ -5,15 +5,24 @@ import time
 from typing import List, Dict, Optional, Tuple, Callable
 from dataclasses import dataclass
 from enum import Enum
+from services.interview_api import InterviewAPI
 from models.base_models import InterviewRequestModel
 from config.settings import STTProvider
 from services.stt_service import AssemblyAITranscriber
+from fastrtc import (
+    get_stt_model, 
+    get_tts_model,
+    KokoroTTSOptions,
+    AdditionalOutputs
+)
+
+
 
 @dataclass
 class VoicebotConfig:
     stt_provider: STTProvider
     questions: List[str]
-    tts_options: dict
+    tts_options: KokoroTTSOptions
     fastrtc_stt_model: any
     tts_model: any
 
@@ -28,13 +37,13 @@ class VoicebotConfig:
         return cls(
             stt_provider=STTProvider.FAST_RTC,
             questions=default_questions,
-            tts_options={
-                "voice": "af_heart",
-                "speed": 1.0,
-                "lang": "en-us"
-            },
-            fastrtc_stt_model=None,  # Will be set later
-            tts_model=None  # Will be set later
+            tts_options=KokoroTTSOptions(
+                voice="af_heart",
+                speed=1.0,
+                lang="en-us"
+            ),
+            fastrtc_stt_model=get_stt_model(),
+            tts_model=get_tts_model()
         )
 
 class InterviewState:
@@ -109,13 +118,14 @@ class InterviewVoicebot:
         self.config = config
         self.state = InterviewState(config.questions)
         self.assemblyai_transcriber = None
-        if self.config.stt_provider == STTProvider.ASSEMBLY_AI:
+        if self.config.stt_provider == STTProvider.ASSEMBLY_AI and aai.settings.api_key:
             self.assemblyai_transcriber = AssemblyAITranscriber()
         self.transformers_convo: List[Dict[str, str]] = []
         self.gradio_convo: List[Tuple[str, str]] = []
         self.followup_enabled = followup_enabled
         self._transcript_buffer = {"text": "", "is_final": False}
         self._updates_queue: List[Dict] = []
+        self.interview_api = interview_api
         self._current_audio_processor = None
 
     def startup(self):
@@ -123,7 +133,7 @@ class InterviewVoicebot:
         self.transformers_convo = [{"role": "assistant", "content": greeting}]
         self.gradio_convo = [(None, greeting)]
         
-        yield {"transformers_convo": self.transformers_convo, "gradio_convo": self.gradio_convo}
+        yield AdditionalOutputs(self.transformers_convo, self.gradio_convo)
         
         for chunk in self.config.tts_model.stream_tts_sync(greeting, options=self.config.tts_options):
             yield chunk
@@ -134,7 +144,7 @@ class InterviewVoicebot:
         self.transformers_convo.append({"role": "assistant", "content": first_question})
         self.gradio_convo.append((None, first_question))
         
-        yield {"transformers_convo": self.transformers_convo, "gradio_convo": self.gradio_convo}
+        yield AdditionalOutputs(self.transformers_convo, self.gradio_convo)
         
         for chunk in self.config.tts_model.stream_tts_sync(first_question, options=self.config.tts_options):
             yield chunk
@@ -173,7 +183,7 @@ class InterviewVoicebot:
         self.gradio_convo.append((user_response, None))
         self.gradio_convo.append((None, next_question))
 
-        yield {"transformers_convo": self.transformers_convo, "gradio_convo": self.gradio_convo}
+        yield AdditionalOutputs(self.transformers_convo, self.gradio_convo)
 
         for chunk in self.config.tts_model.stream_tts_sync(next_question, options=self.config.tts_options):
             yield chunk
@@ -210,7 +220,7 @@ class InterviewVoicebot:
                 else:
                     self.transformers_convo.append({"role": "user", "content": partial})
                 print(f"[DEBUG] Yielding to Gradio (partial): gradio_convo={self.gradio_convo}")
-                yield {"transformers_convo": self.transformers_convo, "gradio_convo": self.gradio_convo}
+                yield AdditionalOutputs(self.transformers_convo, self.gradio_convo)
             if is_final:
                 print(f"[AssemblyAI] Final transcript received: {partial}")
                 final_transcript = partial
@@ -222,7 +232,7 @@ class InterviewVoicebot:
             else:
                 self.gradio_convo.append((final_transcript, None))
             print(f"[DEBUG] Yielding to Gradio (final): gradio_convo={self.gradio_convo}")
-            yield {"transformers_convo": self.transformers_convo, "gradio_convo": self.gradio_convo}
+            yield AdditionalOutputs(self.transformers_convo, self.gradio_convo)
 
         if self.state.awaiting_response:
             print(f"[AssemblyAI] Storing answer: {final_transcript or transcript}")
@@ -252,7 +262,7 @@ class InterviewVoicebot:
         self.transformers_convo.append({"role": "assistant", "content": next_question})
         self.gradio_convo.append((None, next_question))
 
-        yield {"transformers_convo": self.transformers_convo, "gradio_convo": self.gradio_convo}
+        yield AdditionalOutputs(self.transformers_convo, self.gradio_convo)
 
         for chunk in self.config.tts_model.stream_tts_sync(next_question, options=self.config.tts_options):
             yield chunk
@@ -286,3 +296,6 @@ class InterviewVoicebot:
         if provider == STTProvider.ASSEMBLY_AI and not self.assemblyai_transcriber:
             raise ValueError("AssemblyAI API key not configured")
         logging.info(f"[Voicebot] Provider updated to: {provider.value}")
+
+interview_api = InterviewAPI(config_service_root="https://ibd-dev.talent500.co")
+interview_configs: Dict[str, VoicebotConfig] = {}

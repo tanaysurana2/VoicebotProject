@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, Form, HTTPException
+from fastapi import APIRouter, FastAPI, Request, Form, HTTPException , Depends
 from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 import uuid
@@ -7,6 +7,13 @@ from models.base_models import InterviewPayload, InterviewRequestModel
 from services.interview_api import InterviewAPI
 from services.voicebot import InterviewVoicebot, VoicebotConfig
 import gradio as gr
+from config.settings import STTProvider 
+from utils.gradio_util import mount_gradio_interface
+from fastrtc import (
+    ReplyOnPause, WebRTC, get_stt_model, get_tts_model,
+    AlgoOptions, SileroVadOptions, AdditionalOutputs, KokoroTTSOptions
+)
+
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -17,6 +24,9 @@ interview_api = InterviewAPI(config_service_root="https://ibd-dev.talent500.co")
 # Global session storage
 voicebot_sessions = {}
 interview_configs = {}
+
+def get_app(request: Request) -> FastAPI:
+    return request.app
 
 @router.post("/configure_interview")
 async def configure_interview(request: Request):
@@ -89,7 +99,11 @@ async def configure_interview(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/start_interview")
-async def start_interview(session_id: str = Form(...)):
+async def start_interview(
+    request: Request,
+    session_id: str = Form(...),
+    app: FastAPI = Depends(get_app)
+):
     config_dict = interview_configs.get(session_id)
     if not config_dict:
         raise HTTPException(status_code=404, detail="Interview session not found")
@@ -102,11 +116,11 @@ async def start_interview(session_id: str = Form(...)):
     
     config = VoicebotConfig.create_default(questions=questions)
     config.stt_provider = STTProvider(config_dict["stt_provider"])
-    config.tts_options = {
-        "voice": config_dict["tts_voice"],
-        "speed": config_dict["tts_speed"],
-        "lang": config_dict["tts_lang"]
-    }
+    config.tts_options = KokoroTTSOptions(
+        voice=config_dict["tts_voice"],
+        speed=config_dict["tts_speed"],
+        lang=config_dict["tts_lang"]
+    )
     
     followup_enabled = config_dict.get("followup_enabled", True)
     interrupt_enabled = config_dict.get("interrupt_enabled", False)
@@ -117,9 +131,7 @@ async def start_interview(session_id: str = Form(...)):
     voicebot_sessions[session_id] = voicebot
 
     demo = create_ui(session_id, interrupt_enabled=interrupt_enabled)
-    
-    gradio_route = f"/interview/{session_id}"
-    app.mount(gradio_route, gr.mount_gradio_app(app=app, blocks=demo, path=gradio_route))
+    gradio_route = mount_gradio_interface(app, session_id, demo)
     
     return RedirectResponse(url=gradio_route, status_code=303)
 
@@ -167,10 +179,10 @@ def create_ui(session_id: str, interrupt_enabled: bool = False):
 
         with gr.Row():
             with gr.Column():
-                audio = gr.Audio(
+                audio = WebRTC(
                     label="Interview Stream",
-                    type="numpy",
-                    streaming=True
+                    mode="send-receive",
+                    modality="audio"
                 )
             with gr.Column():
                 transcript = gr.Chatbot(label="Interview Transcript", height=500)
@@ -201,18 +213,38 @@ def create_ui(session_id: str, interrupt_enabled: bool = False):
             outputs=[status, status, shared_session_id]
         )
 
+        # --- FIX: Use ReplyOnPause for audio.stream ---
         audio.stream(
-            get_audio_processor(session_id),
+            ReplyOnPause(
+                get_audio_processor(session_id),
+                can_interrupt=interrupt_enabled,
+                startup_fn=voicebot_sessions[session_id].startup,
+                algo_options=AlgoOptions(
+                    audio_chunk_duration=0.6,
+                    started_talking_threshold=0.2,
+                    speech_threshold=0.1
+                ),
+                model_options=SileroVadOptions(
+                    threshold=0.5,
+                    min_speech_duration_ms=100,
+                    min_silence_duration_ms=1000
+                )
+            ),
             inputs=[audio],
             outputs=[audio],
-            show_progress="hidden"
+            time_limit=180
         )
 
-        audio.change(
+        audio.on_additional_outputs(
             lambda s, a: (s, a),
-            inputs=[transformers_convo, transcript],
             outputs=[transformers_convo, transcript],
+            queue=False,
             show_progress="hidden"
         )
 
     return demo
+
+def mount_gradio_interface(app: FastAPI, session_id: str, demo: gr.Blocks) -> str:
+    gradio_route = f"/interview/{session_id}"
+    app.mount(gradio_route, gr.mount_gradio_app(app=app, blocks=demo, path=gradio_route))
+    return gradio_route
